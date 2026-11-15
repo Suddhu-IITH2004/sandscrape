@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09090b">
+  <title>SandScrape — Parallel web extraction</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            zinc: { 925: "#101013" },
+            emerald: { 450: "#12b981" },
+            violet: { 450: "#9670fa" }
+          }
+        }
+      }
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script defer src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09090b;
+      --panel: #121215;
+      --panel-raised: #18181b;
+      --line: #27272a;
+      --muted: #8b8b94;
+      --text: #e4e4e7;
+      --green: #10b981;
+      --violet: #8b5cf6;
+    }
+    [x-cloak] { display: none !important; }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: radial-gradient(ellipse at 42% -20%, rgba(16,185,129,.08), transparent 38%), var(--bg);
+      color: var(--text);
+      font: 14px/1.55 "DM Sans", sans-serif;
+      min-height: 100vh;
+    }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    .mono { font-family: "DM Mono", monospace; }
+    .topbar {
+      height: 66px; border-bottom: 1px solid var(--line); display:flex; align-items:center;
+      justify-content:space-between; padding: 0 max(24px, calc((100vw - 1440px)/2)); position:sticky;
+      top:0; z-index:20; background:rgba(9,9,11,.88); backdrop-filter: blur(18px);
+    }
+    .brand { display:flex; align-items:center; gap:11px; font-size:15px; font-weight:700; letter-spacing:-.03em; }
+    .brand-mark { width:28px;height:28px;border-radius:8px;display:grid;place-items:center;background:rgba(16,185,129,.13);color:var(--green);border:1px solid rgba(16,185,129,.25); }
+    .brand small { color:#71717a;font-size:10px;font-weight:500;letter-spacing:.13em;text-transform:uppercase;margin-left:2px; }
+    .nav { display:flex; gap:4px; background:#101013; padding:4px;border:1px solid var(--line);border-radius:10px; }
+    .nav button { color:#a1a1aa;padding:7px 12px;border-radius:7px;border:0;background:transparent;font-size:12px;font-weight:600; }
+    .nav button.active { background:#27272a;color:#fafafa; }
+    .top-meta { display:flex;align-items:center;gap:8px;color:#a1a1aa;font-size:11px; }
+    .dot { width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 12px rgba(16,185,129,.7); }
+    .page { max-width:1440px;padding:35px 28px 80px;margin:auto; }
+    .hero { display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:25px; }
+    .eyebrow { color:var(--green);font:10px "DM Mono",monospace;text-transform:uppercase;letter-spacing:.16em;margin-bottom:10px; }
+    h1 { margin:0;color:#fafafa;font-size:30px;line-height:1.15;letter-spacing:-.045em; }
+    .subhead { color:#a1a1aa;margin:9px 0 0;max-width:660px;font-size:13px; }
+    .live-badge { border:1px solid #244237;background:rgba(16,185,129,.07);color:#86efac;padding:7px 10px;border-radius:999px;font:10px "DM Mono",monospace;white-space:nowrap; }
+    .workspace { display:grid;grid-template-columns:minmax(320px, .84fr) minmax(0, 1.65fr);gap:16px;align-items:start; }
+    .column { min-width:0;display:grid;gap:16px; }
+    .card { background:linear-gradient(145deg,rgba(255,255,255,.012),transparent 40%),var(--panel);border:1px solid var(--line);border-radius:13px;overflow:hidden; }
+    .card-header { display:flex;align-items:center;justify-content:space-between;padding:15px 17px;border-bottom:1px solid var(--line); }
+    .card-title { color:#e4e4e7;font-size:12px;font-weight:700;display:flex;align-items:center;gap:8px; }
+    .card-title i { color:#a1a1aa;width:15px;height:15px; }
+    .card-body { padding:17px; }
+    .label-row { display:flex;align-items:center;justify-content:space-between;margin-bottom:8px; }
+    .label { font-size:11px;color:#d4d4d8;font-weight:600; }
+    .hint { color:#71717a;font-size:10px; }
+    textarea, input[type="text"] {
+      width:100%;background:#09090b;border:1px solid #303036;border-radius:8px;color:#e4e4e7;
+      outline:0;padding:11px 12px;resize:vertical;transition:border-color .15s,box-shadow .15s;
+    }
+    textarea { min-height:116px;font:11px/1.7 "DM Mono",monospace; }
+    textarea:focus,input:focus { border-color:#15966c;box-shadow:0 0 0 3px rgba(16,185,129,.09); }
+    .presets { display:flex;gap:7px;margin:9px 0 17px; }
+    .subtle-btn { background:transparent;border:1px solid #303036;color:#a1a1aa;padding:6px 9px;border-radius:6px;font-size:10px; }
+    .subtle-btn:hover { border-color:#52525b;color:#e4e4e7; }
+    .range-row { display:flex;align-items:center;gap:12px;margin:7px 0 5px; }
+    input[type="range"] { flex:1;accent-color:var(--green);height:4px; }
+    .range-value { min-width:62px;text-align:right;font:10px "DM Mono",monospace;color:#a1a1aa; }
+    .pool-note { display:flex;align-items:center;justify-content:space-between;color:#71717a;font-size:10px; }
+    .pool-note strong { color:#a1a1aa;font-weight:500; }
+    .field-grid { display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px; }
+    .field-pill { display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid #303036;border-radius:8px;color:#a1a1aa;font-size:10px;cursor:pointer; }
+    .field-pill:has(input:checked) { border-color:#345548;background:rgba(16,185,129,.045);color:#d4d4d8; }
+    .field-pill input { accent-color:var(--green);margin:0; }
+    .field-pill .vision-label { color:#b49aff; }
+    .launch {
+      width:100%;margin-top:16px;padding:11px 14px;border:1px solid #14a574;border-radius:8px;
+      background:linear-gradient(100deg,#059669,#10b981);color:#04130e;font-size:12px;font-weight:700;
+      display:flex;align-items:center;justify-content:center;gap:8px;box-shadow:0 7px 22px rgba(16,185,129,.12);
+    }
+    .launch:hover { filter:brightness(1.08); }.launch:disabled { opacity:.58;cursor:wait; }
+    .error-box { margin-top:12px;border:1px solid #7f1d1d;background:rgba(127,29,29,.18);color:#fca5a5;border-radius:8px;padding:10px;font-size:11px; }
+    .api-card { border:1px solid #332a50;background:linear-gradient(120deg,rgba(139,92,246,.07),transparent 70%),var(--panel); }
+    .api-card .card-title i { color:#a78bfa; }
+    pre { overflow:auto;background:#09090b;border:1px solid #27272a;border-radius:7px;padding:11px;color:#c4b5fd;font:10px/1.65 "DM Mono",monospace;white-space:pre-wrap;word-break:break-word; }
+    .heal-btn { width:100%;border:1px solid #524078;background:rgba(139,92,246,.12);color:#c4b5fd;padding:9px;border-radius:7px;font-size:11px;font-weight:600; }
+    .heal-btn:hover { background:rgba(139,92,246,.2); }
+    .status-strip { display:flex;align-items:center;gap:9px;color:#a1a1aa;font-size:11px; }
+    .status-chip { font:9px "DM Mono",monospace;text-transform:uppercase;letter-spacing:.08em;padding:4px 7px;border-radius:5px;border:1px solid #303036;background:#18181b;color:#a1a1aa; }
+    .status-chip.running { color:#86efac;border-color:#27523e;background:rgba(16,185,129,.08); }
+    .active-pool { font:10px "DM Mono",monospace;color:#a1a1aa; }
+    .fleet-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;padding:14px;min-height:84px; }
+    .sandbox-card { border:1px solid #303036;background:#0d0d0f;border-radius:8px;padding:10px;min-width:0; }
+    .sandbox-head { display:flex;justify-content:space-between;gap:6px;align-items:center;margin-bottom:8px; }
+    .sandbox-id { font:9px "DM Mono",monospace;color:#a1a1aa;overflow:hidden;text-overflow:ellipsis; }
+    .sandbox-status { font:8px "DM Mono",monospace;color:#71717a;white-space:nowrap; }
+    .sandbox-status.winner { color:#86efac; }.sandbox-status.scraping { color:#fcd34d; }
+    .sandbox-domain { color:#e4e4e7;font-size:10px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+    .sandbox-foot { display:flex;justify-content:space-between;margin-top:7px;color:#71717a;font:9px "DM Mono",monospace; }
+    .empty-state { grid-column:1/-1;color:#71717a;text-align:center;padding:12px;font-size:11px; }
+    .monitor { display:grid;grid-template-columns:38px 1fr auto;align-items:center;gap:10px;padding:12px 15px;border-top:1px solid var(--line); }
+    .gpu-icon { width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:rgba(139,92,246,.12);color:#a78bfa; }
+    .monitor-title { font-size:10px;font-weight:700;color:#d4d4d8; }.monitor-sub { color:#71717a;font-size:9px;margin-top:2px; }
+    .monitor-status { font:9px "DM Mono",monospace;color:#a78bfa;text-align:right; }
+    .monitor-status.error { color:#fca5a5; }
+    .log-list { height:130px;overflow:auto;padding:9px 14px;background:#0d0d0f; }
+    .log-line { display:flex;gap:9px;color:#8b8b94;font:9px/1.7 "DM Mono",monospace; }
+    .log-time { color:#52525b;flex:none; }.log-message { color:#a1a1aa;word-break:break-word; }
+    .output-header { display:flex;align-items:center;justify-content:space-between;gap:10px; }
+    .output-tools { display:flex;gap:5px;align-items:center; }
+    .tool-btn { display:flex;align-items:center;gap:5px;padding:6px 8px;border:1px solid #303036;background:transparent;color:#a1a1aa;border-radius:6px;font-size:9px; }
+    .tool-btn:hover { color:#e4e4e7;border-color:#52525b; }.tool-btn i { width:12px;height:12px; }
+    .segmented { display:flex;background:#09090b;border:1px solid #303036;border-radius:6px;padding:2px; }
+    .segmented button { border:0;background:transparent;color:#71717a;padding:4px 7px;font-size:9px;border-radius:4px; }
+    .segmented button.selected { background:#27272a;color:#e4e4e7; }
+    .result-tabs { display:flex;overflow:auto;gap:5px;padding:10px 14px;border-bottom:1px solid var(--line); }
+    .result-tab { flex:none;border:1px solid #303036;background:#0d0d0f;color:#a1a1aa;border-radius:6px;padding:5px 8px;font-size:9px;max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+    .result-tab.selected { border-color:#345548;color:#d1fae5;background:rgba(16,185,129,.06); }
+    .markdown-body { min-height:250px;max-height:520px;overflow:auto;padding:20px 21px;color:#d4d4d8;font-size:12px;line-height:1.75; }
+    .markdown-body h1,.markdown-body h2,.markdown-body h3 { color:#fafafa;letter-spacing:-.025em;line-height:1.3;margin:1.2em 0 .55em; }
+    .markdown-body h1 { font-size:20px; }.markdown-body h2 { font-size:16px; }.markdown-body h3 { font-size:14px; }
+    .markdown-body p { margin:.6em 0; }.markdown-body a { color:#6ee7b7;text-decoration:underline; }
+    .markdown-body code { font:10px "DM Mono",monospace;background:#27272a;padding:2px 4px;border-radius:4px; }
+    .markdown-body table { border-collapse:collapse;display:block;max-width:100%;overflow:auto;font-size:10px; }
+    .markdown-body th,.markdown-body td { padding:6px 8px;border:1px solid #303036;text-align:left; }
+    .markdown-body th { background:#18181b;color:#fafafa; }
+    .markdown-body img { max-width:min(100%,560px);height:auto;border-radius:8px;border:1px solid #303036;display:block;margin:10px 0; }
+    .markdown-body blockquote { margin:8px 0;padding:9px 12px;border:1px solid #3c315e;border-left:3px solid var(--violet);border-radius:7px;background:rgba(139,92,246,.07);color:#c4b5fd; }
+    .markdown-body ul { padding-left:20px; }.markdown-body li { margin:3px 0; }
+    .raw-view { white-space:pre-wrap;word-break:break-word;color:#c4b5fd;font:10px/1.7 "DM Mono",monospace; }
+    .output-placeholder { min-height:250px;display:grid;place-items:center;color:#71717a;font-size:11px;text-align:center;padding:24px; }
+    .pitch { display:grid;gap:16px; }.pitch-intro { padding:32px;border:1px solid #244237;border-radius:14px;background:radial-gradient(ellipse at 85% 20%,rgba(16,185,129,.12),transparent 45%),var(--panel); }
+    .pitch-intro h2 { margin:0;font-size:29px;letter-spacing:-.045em;color:#fafafa;max-width:700px;line-height:1.2; }
+    .pitch-intro p { margin:12px 0 0;color:#a1a1aa;max-width:700px;font-size:13px; }
+    .pitch-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:12px; }
+    .pitch-card { padding:18px;border:1px solid var(--line);border-radius:11px;background:var(--panel); }
+    .pitch-card i { color:var(--green);width:18px;height:18px; }.pitch-card h3 { margin:12px 0 6px;font-size:13px;color:#fafafa; }.pitch-card p { margin:0;color:#a1a1aa;font-size:11px; }
+    .matrix { width:100%;border-collapse:collapse;font-size:11px; }.matrix th,.matrix td { padding:12px 14px;border-bottom:1px solid var(--line);text-align:left; }.matrix th { color:#a1a1aa;font-size:10px;text-transform:uppercase;letter-spacing:.08em; }.matrix td:first-child { color:#d4d4d8;font-weight:600; }.matrix .highlight { color:#a7f3d0;background:rgba(16,185,129,.035); }
+    .diagram { display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;padding:22px; }
+    .diagram-box { min-width:120px;padding:13px;border:1px solid #303036;background:#0d0d0f;border-radius:9px;text-align:center; }
+    .diagram-box strong { display:block;color:#e4e4e7;font-size:10px; }.diagram-box span { color:#71717a;font-size:9px; }.diagram-box.green { border-color:#27523e; }.diagram-box.purple { border-color:#493776; }
+    .arrow { color:#52525b;font-size:17px; }.use-cases { display:grid;grid-template-columns:repeat(3,1fr);gap:10px; }.use-case { padding:13px;border-radius:8px;border:1px solid var(--line);background:#0d0d0f;color:#d4d4d8;font-size:11px; }
+    .footer-note { text-align:center;color:#52525b;font-size:10px;margin-top:25px; }
+    @media (max-width: 900px) { .workspace { grid-template-columns:1fr; }.column:first-child { grid-template-columns:1fr 1fr; }.column:first-child .input-card { grid-column:1/-1; } }
+    @media (max-width: 620px) { .topbar { padding:0 14px;height:58px; }.top-meta { display:none; }.nav button { padding:7px 8px;font-size:10px; }.page { padding:24px 14px 50px; }.hero { align-items:flex-start;flex-direction:column; }.hero h1 { font-size:25px; }.column:first-child { display:grid;grid-template-columns:1fr; }.column:first-child .input-card { grid-column:auto; }.fleet-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }.pitch-grid,.use-cases { grid-template-columns:1fr; }.pitch-intro { padding:22px; }.pitch-intro h2 { font-size:23px; }.output-header { align-items:flex-start;flex-direction:column; }.output-tools { flex-wrap:wrap; } }
+  </style>
+</head>
+<body x-data="sandScrapeApp()" x-init="init()">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark"><i data-lucide="layers-3" style="width:16px;height:16px"></i></span>
+      <span>sand<span style="color:#10b981">scrape</span></span>
+      <small>extraction engine</small>
+    </div>
+    <nav class="nav" aria-label="Main navigation">
+      <button :class="{active: view === 'engine'}" @click="view = 'engine'"><i data-lucide="zap" style="width:12px;height:12px;display:inline-block;vertical-align:-2px"></i> Live Engine</button>
+      <button :class="{active: view === 'pitch'}" @click="view = 'pitch'"><i data-lucide="target" style="width:12px;height:12px;display:inline-block;vertical-align:-2px"></i> Architecture &amp; Pitch</button>
+    </nav>
+    <div class="top-meta"><span class="dot"></span><span x-text="backend ? backend + ' mode' : 'connecting'"></span><span class="mono" style="color:#52525b">·</span><span>10 sandbox cap</span></div>
+  </header>
+
+  <main class="page" x-cloak>
+    <section x-show="view === 'engine'">
+      <div class="hero">
+        <div>
+          <div class="eyebrow">Parallel extraction / self-healing APIs</div>
+          <h1>One URL. Three strategies. <span style="color:#10b981">Best result wins.</span></h1>
+          <p class="subhead">Race extraction strategies in isolated Daytona sandboxes, process batches in parallel, and turn images into useful context with Nosana GPU vision.</p>
+        </div>
+        <div class="live-badge"><span class="dot" style="display:inline-block;margin-right:6px"></span> ENGINE READY</div>
+      </div>
+
+      <div class="workspace">
+        <div class="column">
+          <section class="card input-card">
+            <div class="card-header">
+              <div class="card-title"><i data-lucide="panel-top"></i> New extraction</div>
+              <span class="hint">1–10 URLs</span>
+            </div>
+            <div class="card-body">
+              <div class="label-row"><label for="urls" class="label">Target URLs</label><span class="hint">One public URL per line</span></div>
+              <textarea id="urls" x-model="urlInput" spellcheck="false" placeholder="https://example.com"></textarea>
+              <div class="presets">
+                <button class="subtle-btn" @click="setSinglePreset()">Single URL Race · 3 strategies</button>
+                <button class="subtle-btn" @click="setBatchPreset()">Batch · 3 sites</button>
+              </div>
+
+              <div class="label-row"><span class="label">Sandbox concurrency</span><span class="hint">Hard cap: 10 Daytona sandboxes</span></div>
+              <div class="range-row">
+                <input type="range" min="1" max="10" step="1" x-model.number="concurrency" aria-label="Sandbox concurrency">
+                <span class="range-value" x-text="concurrency + ' / 10'"></span>
+              </div>
+              <div class="pool-note"><span>Max simultaneous strategies</span><strong>Shared global pool</strong></div>
+
+              <div class="label-row" style="margin-top:16px"><span class="label">Extract fields</span><span class="hint">Choose output</span></div>
+              <div class="field-grid">
+                <label class="field-pill"><input type="checkbox" x-model="fields.text"><span>Clean text</span></label>
+                <label class="field-pill"><input type="checkbox" x-model="fields.tables"><span>Structured tables</span></label>
+                <label class="field-pill"><input type="checkbox" x-model="fields.images"><span class="vision-label">Images + Nosana VLM</span></label>
+                <label class="field-pill"><input type="checkbox" x-model="fields.links"><span>Links &amp; metadata</span></label>
+              </div>
+              <div class="error-box" x-show="formError" x-text="formError"></div>
+              <button class="launch" @click="launch()" :disabled="status === 'running'">
+                <i data-lucide="zap" style="width:15px;height:15px"></i>
+                <span x-text="status === 'running' ? 'Racing strategies…' : 'Launch Parallel Sandboxes'"></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="card api-card">
+            <div class="card-header">
+              <div class="card-title"><i data-lucide="heart-pulse"></i> Self-healing extraction API</div>
+              <span class="status-chip">REST</span>
+            </div>
+            <div class="card-body">
+              <div class="hint" style="margin-bottom:8px">Re-run the strategy race whenever a target page structure changes.</div>
+              <pre>curl -X POST http://localhost:8000/api/v1/self-heal \
+  -H "Content-Type: application/json" \
+  -d '{"urls":["https://example.com"]}'</pre>
+              <button class="heal-btn" @click="simulateHeal()" :disabled="status === 'running'"><i data-lucide="refresh-cw" style="width:12px;height:12px;display:inline-block;vertical-align:-2px"></i> Simulate Site Breakage · Self-Heal</button>
+            </div>
+          </section>
+        </div>
+
+        <div class="column">
+          <section class="card">
+            <div class="card-header">
+              <div class="card-title"><i data-lucide="server"></i> Daytona sandbox fleet</div>
+              <div class="status-strip">
+                <span class="status-chip" :class="{running: status === 'running'}" x-text="status"></span>
+                <span class="active-pool" x-text="activeCount + ' / ' + cap + ' running'"></span>
+              </div>
+            </div>
+            <div class="fleet-grid">
+              <template x-if="sandboxes.length === 0">
+                <div class="empty-state">Your sandbox race will appear here. Up to 10 workers can run concurrently.</div>
+              </template>
+              <template x-for="sandbox in sandboxes" :key="sandbox.sandbox_id">
+                <article class="sandbox-card">
+                  <div class="sandbox-head">
+                    <span class="sandbox-id" x-text="sandbox.sandbox_id"></span>
+                    <span class="sandbox-status" :class="sandbox.status === 'WINNER' ? 'winner' : (sandbox.status === 'SCRAPING' ? 'scraping' : '')" x-text="sandbox.status"></span>
+                  </div>
+                  <div class="sandbox-domain" x-text="sandbox.domain"></div>
+                  <div class="sandbox-foot"><span x-text="sandbox.strategy"></span><span x-text="sandbox.elapsed_ms + ' ms'"></span></div>
+                </article>
+              </template>
+            </div>
+            <div class="monitor">
+              <div class="gpu-icon"><i data-lucide="cpu" style="width:17px;height:17px"></i></div>
+              <div><div class="monitor-title">Nosana GPU Vision · <span x-text="model"></span></div><div class="monitor-sub" x-text="visionMessage"></div></div>
+              <div class="monitor-status" :class="{error: visionStatus === 'ERROR'}" x-text="visionStatus"></div>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-header"><div class="card-title"><i data-lucide="terminal"></i> Live telemetry</div><span class="hint mono" x-text="logs.length + ' events'"></span></div>
+            <div class="log-list" x-ref="logs">
+              <template x-if="logs.length === 0"><div class="empty-state">Sandbox lifecycle and GPU events stream here.</div></template>
+              <template x-for="(entry, index) in logs" :key="index">
+                <div class="log-line"><span class="log-time" x-text="entry.time"></span><span class="log-message" x-text="entry.message"></span></div>
+              </template>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-header output-header">
+              <div class="card-title"><i data-lucide="file-output"></i> Output workspace</div>
+              <div class="output-tools">
+                <div class="segmented">
+                  <button :class="{selected: outputMode === 'preview'}" @click="outputMode = 'preview'">Preview</button>
+                  <button :class="{selected: outputMode === 'raw'}" @click="outputMode = 'raw'">Raw Markdown</button>
+                </div>
+                <button class="tool-btn" @click="copyOutput()" :disabled="!currentResult"><i data-lucide="copy"></i> Copy</button>
+                <button class="tool-btn" @click="downloadOutput()" :disabled="!currentResult"><i data-lucide="download"></i> .md</button>
+              </div>
+            </div>
+            <div class="result-tabs" x-show="results.length">
+              <template x-for="(result, index) in results" :key="result.url">
+                <button class="result-tab" :class="{selected: selectedIndex === index}" @click="selectedIndex = index" x-text="result.domain || result.url"></button>
+              </template>
+            </div>
+            <div class="markdown-body" x-show="currentResult && outputMode === 'preview'" x-html="renderedMarkdown"></div>
+            <div class="markdown-body raw-view" x-show="currentResult && outputMode === 'raw'" x-text="currentResult ? currentResult.markdown : ''"></div>
+            <div class="output-placeholder" x-show="!currentResult">
+              <div><i data-lucide="file-text" style="width:24px;height:24px;margin:0 auto 9px;color:#52525b"></i><div>Extracted Markdown and visual insights will show here.</div></div>
+            </div>
+          </section>
+        </div>
+      </div>
+      <div class="footer-note">SandScrape · Daytona elastic compute × Nosana decentralized GPU vision</div>
+    </section>
+
+    <section class="pitch" x-show="view === 'pitch'">
+      <div class="pitch-intro">
+        <div class="eyebrow">The extraction layer for the dynamic web</div>
+        <h2>Websites change. Your extraction pipeline shouldn’t break with them.</h2>
+        <p>SandScrape races independent extraction strategies in parallel, returns the first useful result, and can re-run the race when a target changes. Rich images can be routed to a Nosana-hosted vision model for structured context.</p>
+      </div>
+      <div class="pitch-grid">
+        <article class="pitch-card"><i data-lucide="clock-3"></i><h3>Sequential scraping is a bottleneck</h3><p>Traditional crawlers wait on every page and every selector. Parallel execution keeps independent URLs and strategies moving at once.</p></article>
+        <article class="pitch-card"><i data-lucide="wrench"></i><h3>Selectors are brittle</h3><p>Race DOM, fast HTML, and heuristic extraction. A failed strategy does not block the rest; re-run the race to recover from page changes.</p></article>
+        <article class="pitch-card"><i data-lucide="eye-off"></i><h3>Text pipelines miss visual data</h3><p>Charts, labels, and product images can carry the important details. Nosana VLM adds concise image descriptions to the Markdown output.</p></article>
+      </div>
+      <section class="card">
+        <div class="card-header"><div class="card-title"><i data-lucide="scale"></i> Why SandScrape</div><span class="hint">Architecture comparison</span></div>
+        <div style="overflow:auto">
+          <table class="matrix">
+            <thead><tr><th>Capability</th><th>Traditional scrapers</th><th>Single-agent scraper</th><th class="highlight">SandScrape</th></tr></thead>
+            <tbody>
+              <tr><td>Strategy execution</td><td>One fixed parser</td><td>One agent at a time</td><td class="highlight">3 strategies raced in parallel</td></tr>
+              <tr><td>Multi-site batch</td><td>Sequential queues</td><td>Limited concurrency</td><td class="highlight">Up to 10 shared sandbox workers</td></tr>
+              <tr><td>DOM change recovery</td><td>Manual selector repair</td><td>Prompt-dependent retry</td><td class="highlight">Re-run race through self-heal API</td></tr>
+              <tr><td>Visual understanding</td><td>Image URLs only</td><td>Often out of scope</td><td class="highlight">Optional Nosana-hosted Ollama VLM</td></tr>
+              <tr><td>Isolation</td><td>Shared process</td><td>Usually shared process</td><td class="highlight">Daytona sandbox per strategy</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-header"><div class="card-title"><i data-lucide="workflow"></i> System architecture</div><span class="hint mono">MAX 10 CONCURRENT SANDBOXES</span></div>
+        <div class="diagram">
+          <div class="diagram-box"><strong>URL batch</strong><span>1–10 public pages</span></div><span class="arrow">→</span>
+          <div class="diagram-box green"><strong>Daytona fan-out</strong><span>bs4 · DOM · heuristic</span></div><span class="arrow">→</span>
+          <div class="diagram-box"><strong>Race winner</strong><span>losers terminated</span></div><span class="arrow">→</span>
+          <div class="diagram-box purple"><strong>Nosana GPU</strong><span>base64 → Ollama VLM</span></div><span class="arrow">→</span>
+          <div class="diagram-box"><strong>Markdown + API</strong><span>SSE · REST · self-heal</span></div>
+        </div>
+      </section>
+      <section class="card">
+        <div class="card-header"><div class="card-title"><i data-lucide="sparkles"></i> High-impact use cases</div></div>
+        <div class="card-body use-cases">
+          <div class="use-case">Competitive intelligence across changing product pages</div>
+          <div class="use-case">Multimodal RAG ingestion with tables and image context</div>
+          <div class="use-case">Fresh web context for autonomous agents and research tools</div>
+        </div>
+      </section>
+      <div class="footer-note">A resilient pipeline by design: parallelize the work, validate the result, and heal by racing again.</div>
+    </section>
+  </main>
+
+  <script>
+    function sandScrapeApp() {
+      return {
+        view: "engine",
+        urlInput: "https://news.ycombinator.com/",
+        concurrency: 10,
+        fields: { text: true, tables: true, images: true, links: false },
+        status: "idle",
+        backend: "",
+        cap: 10,
+        activeCount: 0,
+        sandboxes: [],
+        logs: [],
+        results: [],
+        selectedIndex: 0,
+        outputMode: "preview",
+        formError: "",
+        visionStatus: "IDLE",
+        visionMessage: "Images are analyzed when an Ollama endpoint is configured.",
+        model: "qwen3.5:9b",
+        eventSource: null,
+        jobId: null,
+        get currentResult() { return this.results[this.selectedIndex] || null; },
+        get renderedMarkdown() {
+          if (!this.currentResult || !window.marked || !window.DOMPurify) return "";
+          return DOMPurify.sanitize(marked.parse(this.currentResult.markdown || ""));
+        },
+        init() {
+          fetch("/api/v1/health").then(response => response.json()).then(data => {
+            this.backend = data.backend;
+            this.cap = data.max_concurrent_sandboxes;
+            this.activeCount = data.active_sandboxes;
+          }).catch(() => this.addLog("API health check unavailable."));
+          this.$nextTick(() => { if (window.lucide) lucide.createIcons(); });
+        },
+        parseUrls() {
+          return [...new Set(this.urlInput.split(/\r?\n/).map(value => value.trim()).filter(Boolean))];
+        },
+        setSinglePreset() { this.urlInput = "https://news.ycombinator.com/"; this.concurrency = 3; },
+        setBatchPreset() {
+          this.urlInput = "https://news.ycombinator.com/\nhttps://www.bbc.com/news\nhttps://www.nature.com/";
+          this.concurrency = 9;
+        },
+        addLog(message) {
+          const time = new Date().toLocaleTimeString([], { hour12: false });
+          this.logs.push({ time, message: String(message) });
+          if (this.logs.length > 150) this.logs.splice(0, this.logs.length - 150);
+          this.$nextTick(() => { if (this.$refs.logs) this.$refs.logs.scrollTop = this.$refs.logs.scrollHeight; });
+        },
+        async launch(endpoint) {
+          this.formError = "";
+          const urls = this.parseUrls();
+          if (!urls.length || urls.length > 10) {
+            this.formError = "Enter between 1 and 10 unique URLs.";
+            return;
+          }
+          const selectedFields = Object.keys(this.fields).filter(key => this.fields[key]);
+          if (!selectedFields.length) {
+            this.formError = "Select at least one extraction field.";
+            return;
+          }
+          if (this.eventSource) this.eventSource.close();
+          this.status = "running";
+          this.sandboxes = [];
+          this.results = [];
+          this.selectedIndex = 0;
+          this.activeCount = 0;
+          this.visionStatus = "QUEUED";
+          this.visionMessage = "Waiting for extracted images.";
+          const requestBody = {
+            urls,
+            fields: selectedFields,
+            concurrency: Number(this.concurrency)
+          };
+          try {
+            const response = await fetch(endpoint || "/api/v1/extract", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(requestBody)
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.detail || "Could not start extraction.");
+            this.jobId = payload.job_id;
+            this.addLog("Job " + this.jobId.slice(0, 8) + " queued (" + urls.length + " URL" + (urls.length === 1 ? "" : "s") + ").");
+            this.eventSource = new EventSource(payload.events_url);
+            this.eventSource.onmessage = event => this.handleEvent(JSON.parse(event.data));
+            this.eventSource.onerror = () => {
+              if (this.eventSource && this.status !== "running") this.eventSource.close();
+            };
+          } catch (error) {
+            this.status = "failed";
+            this.formError = error.message || "Extraction failed.";
+            this.addLog(this.formError);
+          }
+        },
+        async simulateHeal() {
+          const urls = this.parseUrls();
+          if (!urls.length) { this.formError = "Add a URL before running self-heal."; return; }
+          this.addLog("Simulating target change — re-running all extraction strategies.");
+          await this.launch("/api/v1/self-heal");
+        },
+        handleEvent(event) {
+          switch (event.type) {
+            case "job_started":
+              this.backend = event.backend;
+              this.cap = event.cap;
+              this.addLog("Engine started with " + event.backend + " backend.");
+              break;
+            case "sandbox_update": {
+              const index = this.sandboxes.findIndex(item => item.sandbox_id === event.sandbox_id || item.sandbox_id === event.previous_id);
+              const status = event.status === "COMPLETE" && this.sandboxes.some(item => item.status === "WINNER" && item.domain === event.domain) ? "TERMINATED" : event.status;
+              const card = { ...event, status };
+              if (index >= 0) this.sandboxes.splice(index, 1, { ...this.sandboxes[index], ...card });
+              else this.sandboxes.unshift(card);
+              this.sandboxes = this.sandboxes.slice(0, 10);
+              this.activeCount = event.active ?? this.activeCount;
+              if (event.status === "SPINNING UP") this.addLog(event.sandbox_id + " spinning up · " + event.strategy + " · " + event.domain);
+              if (event.status === "TERMINATED") this.addLog(event.sandbox_id + " terminated after race.");
+              break;
+            }
+            case "race_winner":
+              this.sandboxes = this.sandboxes.map(item => item.sandbox_id === event.sandbox_id ? { ...item, status: "WINNER" } : item);
+              this.addLog("Winner: " + event.strategy + " for " + event.url);
+              break;
+            case "nosana_started":
+              this.visionStatus = "ANALYZING " + event.index + "/" + event.total;
+              this.visionMessage = "Sending image to " + event.model + " on Nosana GPU.";
+              this.addLog("Nosana image analysis started (" + event.index + "/" + event.total + ").");
+              break;
+            case "nosana_done":
+              this.visionStatus = "COMPLETE";
+              this.visionMessage = "GPU inference complete · " + event.latency_ms + " ms.";
+              this.addLog("Nosana VLM completed in " + event.latency_ms + " ms.");
+              break;
+            case "nosana_error":
+              this.visionStatus = "ERROR";
+              this.visionMessage = event.error;
+              this.addLog("Nosana analysis failed: " + event.error);
+              break;
+            case "nosana_status":
+              this.visionStatus = event.status;
+              this.visionMessage = event.message;
+              break;
+            case "url_complete": {
+              const existing = this.results.findIndex(item => item.url === event.url);
+              if (existing >= 0) this.results.splice(existing, 1, event.result);
+              else this.results.push(event.result);
+              this.selectedIndex = Math.max(0, this.results.length - 1);
+              this.addLog("Markdown output ready for " + event.result.domain + ".");
+              break;
+            }
+            case "url_error":
+              this.addLog("URL failed: " + event.url + " · " + event.error);
+              break;
+            case "sandbox_cleanup_error":
+              this.addLog("Cleanup warning for " + event.sandbox_id + ": " + event.error);
+              break;
+            case "job_complete":
+              this.status = "completed";
+              this.activeCount = 0;
+              this.addLog("Extraction job complete.");
+              if (this.eventSource) this.eventSource.close();
+              this.$nextTick(() => { if (window.lucide) lucide.createIcons(); });
+              break;
+            case "job_failed":
+              this.status = "failed";
+              this.activeCount = 0;
+              this.formError = event.error;
+              this.addLog("Job failed: " + event.error);
+              if (this.eventSource) this.eventSource.close();
+              break;
+            case "job_cancelled":
+              this.status = "cancelled";
+              this.activeCount = 0;
+              this.addLog("Job cancelled.");
+              if (this.eventSource) this.eventSource.close();
+              break;
+          }
+        },
+        async copyOutput() {
+          if (!this.currentResult) return;
+          try {
+            await navigator.clipboard.writeText(this.currentResult.markdown);
+            this.addLog("Markdown copied to clipboard.");
+          } catch (error) { this.formError = "Clipboard access failed: " + error.message; }
+        },
+        downloadOutput() {
+          if (!this.currentResult) return;
+          const blob = new Blob([this.currentResult.markdown], { type: "text/markdown;charset=utf-8" });
+          const anchor = document.createElement("a");
+          anchor.href = URL.createObjectURL(blob);
+          anchor.download = (this.currentResult.domain || "sandscrape").replace(/[^a-z0-9.-]/gi, "-") + ".md";
+          anchor.click();
+          URL.revokeObjectURL(anchor.href);
+        }
+      };
+    }
+  </script>
+</body>
+</html>
