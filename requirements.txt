@@ -1,9 +1,15 @@
-fastapi>=0.110,<1
-uvicorn[standard]>=0.29,<1
-daytona>=0.198,<1
-sse-starlette>=2.1
-pydantic>=2.6,<3
+# SandScrape — host-side dependencies
+fastapi>=0.110
+uvicorn[standard]>=0.29
+# Daytona Python SDK. The package was renamed from `daytona-sdk` to `daytona`;
+# orchestrator.py imports either name, so keep whichever your team already uses.
+daytona>=0.100
+sse-starlette>=2.0
+pydantic>=2.5
 python-dotenv>=1.0
-httpx>=0.27,<1
+httpx>=0.27
 beautifulsoup4>=4.12
 markdownify>=0.12
+openai>=1.30
+# Optional, only for local mode's playwright-dom strategy:
+#   pip install playwright && playwright install chromium

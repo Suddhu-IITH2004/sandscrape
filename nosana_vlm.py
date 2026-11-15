@@ -1,162 +1,178 @@
-"""Nosana-hosted Ollama vision client."""
+"""
+nosana_vlm.py — sends images extracted by the winning Daytona sandbox to a Vision-Language
+Model hosted on Nosana's decentralized GPU network (OpenAI-compatible endpoint, e.g. vLLM
+serving Qwen2.5-VL). Falls back to OpenAI / Gemini if the Nosana node is cold, and labels
+every insight with the provider that actually produced it.
 
+`event_queue` is the run's telemetry queue (orchestrator.RunQueue): anything exposing
+`async emit(event_type, **data)`.
+"""
 from __future__ import annotations
 
 import asyncio
 import base64
-import logging
+import os
 import time
 from dataclasses import dataclass
-from urllib.parse import urljoin
 
 import httpx
+from openai import AsyncOpenAI
 
-from strategies import ImageRef, validate_public_url
-
-logger = logging.getLogger(__name__)
 DEFAULT_PROMPT = (
-    "Describe this scraped web image concisely in 2-3 sentences for Markdown "
-    "documentation. Extract any visible text, chart metrics, or product details."
+    "Describe this image from a web page in 2-4 concise, factual sentences. "
+    "Transcribe any important visible text or numbers. If it is a chart, state the chart type, "
+    "axes and the main trend. If it is a product, name it and its key visible attributes. "
+    "If it is a UI screenshot, say what the screen does. Do not speculate beyond what is visible."
 )
-MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+MAX_IMAGE_BYTES = 4 * 1024 * 1024
 
 
-@dataclass(slots=True)
-class VisionInsight:
-    url: str
-    description: str
-    latency_ms: int
+@dataclass
+class Provider:
+    key: str          # "nosana" | "openai" | "gemini"
+    label: str        # shown in the UI
+    base_url: str | None
+    api_key: str
+    model: str
 
 
-async def _download_image(client: httpx.AsyncClient, image_url: str) -> tuple[bytes, str]:
-    current_url = image_url
-    for _ in range(6):
-        await validate_public_url(current_url)
-        async with client.stream("GET", current_url, follow_redirects=False) as response:
-            if response.is_redirect:
-                location = response.headers.get("location")
-                if not location:
-                    raise ValueError("The image returned an invalid redirect.")
-                current_url = urljoin(current_url, location)
-                continue
-            response.raise_for_status()
-            content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
-            if not content_type.startswith("image/") or content_type == "image/svg+xml":
-                raise ValueError("Only raster images can be sent for visual analysis.")
-            content = bytearray()
-            async for chunk in response.aiter_bytes():
-                content.extend(chunk)
-                if len(content) > MAX_IMAGE_BYTES:
-                    raise ValueError("The image exceeded the 8 MB size limit.")
-            if not content:
-                raise ValueError("The image response was empty.")
-            return bytes(content), content_type
-    raise ValueError("The image redirected too many times.")
+def configured_providers() -> list[Provider]:
+    """Nosana first; fallbacks only if their keys are present."""
+    out: list[Provider] = []
+    endpoint = os.getenv("NOSANA_VLM_ENDPOINT", "").strip()
+    if endpoint and "YOUR-DEPLOYMENT" not in endpoint:
+        out.append(Provider("nosana", "Nosana GPU", endpoint.rstrip("/"),
+                            os.getenv("NOSANA_API_KEY", "") or "nosana",
+                            os.getenv("NOSANA_VLM_MODEL", "Qwen/Qwen2.5-VL-7B-Instruct")))
+    if os.getenv("OPENAI_API_KEY"):
+        out.append(Provider("openai", "OpenAI (fallback)", None, os.environ["OPENAI_API_KEY"],
+                            os.getenv("OPENAI_VLM_MODEL", "gpt-4o-mini")))
+    if os.getenv("GEMINI_API_KEY"):
+        out.append(Provider("gemini", "Gemini (fallback)",
+                            "https://generativelanguage.googleapis.com/v1beta/openai/",
+                            os.environ["GEMINI_API_KEY"],
+                            os.getenv("GEMINI_VLM_MODEL", "gemini-2.5-flash")))
+    return out
 
 
-async def analyze_images_with_nosana(
-    images: list[ImageRef],
-    custom_prompt: str | None,
-    event_queue: asyncio.Queue[dict[str, object]],
-    ollama_url: str,
-    model: str,
-) -> list[VisionInsight]:
-    """Describe up to three page images through the configured Ollama endpoint."""
-    insights: list[VisionInsight] = []
-    selected = images[:3]
-    if not selected:
-        return insights
-    prompt = (custom_prompt or "").strip()[:1000] or DEFAULT_PROMPT
-    endpoint = urljoin(ollama_url.rstrip("/") + "/", "api/chat")
-    client_timeout = httpx.Timeout(8.0, connect=4.0)
+def gpu_label() -> str:
+    return os.getenv("NOSANA_GPU_LABEL", "Nosana GPU node")
 
-    async with httpx.AsyncClient(timeout=client_timeout, trust_env=False) as client:
-        async def analyze_one(index: int, image: ImageRef) -> VisionInsight | None:
-            started = time.monotonic()
-            await event_queue.put({
-                "type": "nosana_started",
-                "image": image.url,
-                "index": index,
-                "total": len(selected),
-                "model": model,
-                "status": "ANALYZING",
-            })
-            try:
-                async with asyncio.timeout(12):
-                    image_bytes, content_type = await _download_image(client, image.url)
-                    response = await client.post(
-                        endpoint,
-                        json={
-                            "model": model,
-                            "messages": [{
-                                "role": "user",
-                                "content": prompt,
-                                "images": [base64.b64encode(image_bytes).decode("ascii")],
-                            }],
-                            "stream": False,
-                        },
-                    )
-                    response.raise_for_status()
-                    payload = response.json()
-                    if not isinstance(payload, dict):
-                        raise ValueError("The vision service returned an invalid response.")
-                    message = payload.get("message", {})
-                    if not isinstance(message, dict):
-                        raise ValueError("The vision service returned an invalid message.")
-                    raw_description = message.get("content", "")
-                    if not isinstance(raw_description, str) or not raw_description.strip():
-                        raise ValueError("The vision service returned an invalid description.")
-                    description = raw_description.strip()
-                    if not description:
-                        raise ValueError("The vision service returned an empty description.")
-                    elapsed = round((time.monotonic() - started) * 1000)
-                    insight = VisionInsight(image.url, description, elapsed)
-                    await event_queue.put({
-                        "type": "nosana_done",
-                        "image": image.url,
-                        "index": index,
-                        "total": len(selected),
-                        "model": model,
-                        "latency_ms": elapsed,
-                        "content_type": content_type,
-                        "status": "COMPLETE",
-                    })
-                    return insight
-            except (TimeoutError, httpx.HTTPError, ValueError, KeyError) as exc:
-                logger.warning("Nosana image analysis failed for %s: %s", image.url, exc)
-                await event_queue.put({
-                    "type": "nosana_error",
-                    "image": image.url,
-                    "index": index,
-                    "total": len(selected),
-                    "model": model,
-                    "status": "ERROR",
-                    "error": str(exc),
-                })
-                return None
 
-        results = await asyncio.gather(
-            *(analyze_one(index, image) for index, image in enumerate(selected, start=1))
+async def _to_data_url(client: httpx.AsyncClient, url: str) -> str:
+    """Download the image host-side so the VLM never has to hotlink (many sites block it).
+    Falls back to the raw URL if the download fails."""
+    try:
+        r = await client.get(url, timeout=4.0, follow_redirects=True)
+        r.raise_for_status()
+        ctype = r.headers.get("content-type", "image/jpeg").split(";")[0]
+        if not ctype.startswith("image/") or len(r.content) > MAX_IMAGE_BYTES:
+            return url
+        return f"data:{ctype};base64,{base64.b64encode(r.content).decode()}"
+    except Exception:
+        return url
+
+
+async def _ask(provider: Provider, image_ref: str, prompt: str, timeout: float) -> str:
+    client = AsyncOpenAI(base_url=provider.base_url, api_key=provider.api_key,
+                         timeout=timeout, max_retries=0)
+    try:
+        resp = await asyncio.wait_for(
+            client.chat.completions.create(
+                model=provider.model,
+                max_tokens=220,
+                temperature=0.2,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": image_ref}},
+                    ],
+                }],
+            ),
+            timeout=timeout,
         )
-    return [result for result in results if result is not None]
+        text = (resp.choices[0].message.content or "").strip()
+        if not text:
+            raise RuntimeError("empty completion")
+        return " ".join(text.split())
+    finally:
+        await client.close()
 
 
-def append_insights(markdown: str, insights: list[VisionInsight]) -> str:
-    """Place each vision result directly after its corresponding Markdown image."""
-    for insight in insights:
-        escaped_url = insight.url.replace(")", r"\)")
-        image_pattern = f"]({escaped_url})"
-        marker = (
-            f"]({escaped_url})\n\n"
-            f"> **Nosana {insight.latency_ms} ms Visual Insight**\n"
-            + "\n".join(f"> {line}" for line in insight.description.splitlines())
-        )
-        if image_pattern in markdown:
-            markdown = markdown.replace(image_pattern, marker, 1)
-        else:
-            markdown += (
-                f"\n\n![Image]({escaped_url})\n\n"
-                f"> **Nosana {insight.latency_ms} ms Visual Insight**\n"
-                + "\n".join(f"> {line}" for line in insight.description.splitlines())
-            )
-    return markdown
+async def analyze_images_with_nosana(images: list[dict], custom_prompt: str, event_queue) -> list[dict]:
+    """Analyze up to MAX_VLM_IMAGES images. Returns one insight dict per analyzed image:
+    {url, alt, insight, provider, provider_label, model, ms, ok}."""
+    max_images = int(os.getenv("MAX_VLM_IMAGES", "3"))
+    timeout = float(os.getenv("VLM_TIMEOUT_S", "10"))
+    targets = images[:max_images]
+    providers = configured_providers()
+    prompt = DEFAULT_PROMPT + (f"\nThe user's goal: {custom_prompt.strip()}" if custom_prompt.strip() else "")
+    primary = providers[0] if providers else None
+    t_start = time.perf_counter()
+
+    await event_queue.emit(
+        "nosana_started", count=len(targets),
+        provider=primary.key if primary else "none",
+        provider_label=primary.label if primary else "No VLM configured",
+        model=primary.model if primary else "-", gpu=gpu_label(),
+    )
+    await event_queue.emit("log", msg=(
+        f"Nosana GPU: generating VLM descriptions for {len(targets)} extracted image(s) "
+        f"via {primary.model if primary else 'n/a'}"
+    ))
+
+    nosana_down = asyncio.Event()  # circuit breaker: skip Nosana for this run once it fails
+
+    async with httpx.AsyncClient(headers={"User-Agent": "SandScrape/1.0"}) as http:
+        async def one(idx: int, img: dict) -> dict:
+            t0 = time.perf_counter()
+            ref = await _to_data_url(http, img["url"])
+            last_err = "no VLM provider configured"
+            for prov in providers:
+                if prov.key == "nosana" and nosana_down.is_set():
+                    continue
+                try:
+                    text = await _ask(prov, ref, prompt, timeout)
+                    ms = int((time.perf_counter() - t0) * 1000)
+                    item = {"url": img["url"], "alt": img.get("alt", ""), "insight": text,
+                            "provider": prov.key, "provider_label": prov.label,
+                            "model": prov.model, "ms": ms, "ok": True}
+                    await event_queue.emit("nosana_image_done", index=idx, **item)
+                    return item
+                except Exception as e:  # noqa: BLE001 — any provider failure means "try next"
+                    last_err = f"{type(e).__name__}: {str(e)[:120]}"
+                    if prov.key == "nosana":
+                        nosana_down.set()
+                    await event_queue.emit("log", msg=f"VLM {prov.label} failed on image {idx + 1} ({last_err}); routing to next provider")
+            ms = int((time.perf_counter() - t0) * 1000)
+            item = {"url": img["url"], "alt": img.get("alt", ""),
+                    "insight": f"VLM analysis unavailable ({last_err}). Alt text: {img.get('alt') or 'none'}",
+                    "provider": "none", "provider_label": "Unavailable", "model": "-", "ms": ms, "ok": False}
+            await event_queue.emit("nosana_image_done", index=idx, **item)
+            return item
+
+        results = await asyncio.gather(*(one(i, im) for i, im in enumerate(targets)))
+
+    total_ms = int((time.perf_counter() - t_start) * 1000)
+    used = sorted({r["provider_label"] for r in results if r["ok"]}) or ["none"]
+    await event_queue.emit("nosana_completed", count=sum(r["ok"] for r in results),
+                           total=len(results), ms=total_ms, providers=used)
+    return list(results)
+
+
+def format_images_markdown(images: list[dict], insights: list[dict], extra_limit: int = 6) -> str:
+    """`![alt](url)` + an insight blockquote under each analyzed image; remaining images listed plainly."""
+    if not images:
+        return ""
+    by_url = {i["url"]: i for i in insights}
+    blocks = ["## Images"]
+    for img in images[:extra_limit]:
+        alt = (img.get("alt") or "image").replace("]", ")").replace("[", "(")
+        blocks.append(f"![{alt}]({img['url']})")
+        ins = by_url.get(img["url"])
+        if ins:
+            heading = "Nosana VLM Insight" if ins["provider"] == "nosana" else f"VLM Insight — {ins['provider_label']}"
+            blocks.append(f"> **{heading}:** {ins['insight']}\n>\n> <sub>{ins['model']} · {ins['ms']} ms</sub>")
+    return "\n\n".join(blocks)
