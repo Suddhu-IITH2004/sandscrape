@@ -1,9 +1,9 @@
-# AGENTS.md — HydraScrape (Daytona HackSprint Tokyo MVP)
+# AGENTS.md — SandScrape (Daytona HackSprint Tokyo MVP)
 
 ## 1. Project Overview & Winning Thesis
-**HydraScrape** is a parallel, self-healing web extraction engine and instant API generator powered by **Daytona Sandboxes**. 
+**sandScrape** is a parallel, self-healing web extraction engine and instant API generator powered by **Daytona Sandboxes**. 
 - **Core Problem:** Traditional web scrapers are brittle. Hardcoded CSS/XPath selectors break the moment a site updates its DOM, and single-method scrapers fail on dynamic JavaScript pages or waste compute running heavy browsers on static HTML.
-- **Core Solution:** When a user inputs a target URL and selects desired extraction fields (Text, Tables, Images, Links/Metadata, Custom Prompt), HydraScrape uses `asyncio` to spin up **3 isolated Daytona Sandboxes simultaneously** (~100ms startup), racing 3 distinct extraction strategies in parallel:
+- **Core Solution:** When a user inputs a target URL and selects desired extraction fields (Text, Tables, Images, Links/Metadata, Custom Prompt), sandScrape uses `asyncio` to spin up **3 isolated Daytona Sandboxes simultaneously** (~100ms startup), racing 3 distinct extraction strategies in parallel:
   1. **Sandbox Alpha (Fast Static):** `httpx` + `BeautifulSoup4` + `markdownify` (ultra-fast, low compute).
   2. **Sandbox Beta (Dynamic DOM):** `Playwright` headless Chromium (renders SPAs, JS-heavy sites, lazy-loaded tables/images).
   3. **Sandbox Gamma (AI Heuristic / XHR):** Network/DOM structural extractor using LLM-guided extraction rules to survive layout changes.
@@ -49,12 +49,12 @@ Keep the stack lightweight, zero-build-step on the frontend, and strictly asynch
    - Streaming mini-console log showing real-time Daytona SDK lifecycle events (`[142ms] Sandbox dtn-8a9f ready`, `[310ms] Extracting tables...`, `[480ms] Validation passed — killing slower sandboxes`).
 3. **Output Workspace (Split/Tabbed View):**
    - **Rendered Markdown Preview** (cleanly styled typography, tables, and image previews) vs. **Raw Markdown** (with 1-click Copy & Download `.md` button).
-   - **Auto-Generated Self-Healing API Card:** Shows a live `curl` command (`curl -X POST http://localhost:8000/api/scrape -d ...`) and a **"Simulate Site Breakage (Self-Heal Demo)"** button that demonstrates how HydraScrape detects a schema mismatch and re-races sandboxes automatically.
+   - **Auto-Generated Self-Healing API Card:** Shows a live `curl` command (`curl -X POST http://localhost:8000/api/scrape -d ...`) and a **"Simulate Site Breakage (Self-Heal Demo)"** button that demonstrates how sandScrape detects a schema mismatch and re-races sandboxes automatically.
 
 ### View 2: Architecture & Pitch Page (Replaces Slide Deck)
 Designed specifically to be presented on screen during the 3-minute judging pitch:
 1. **The Problem (Why Traditional Scraping Fails):** Visual comparison showing brittle CSS selectors breaking on DOM changes vs. high cost of running headless browsers for every request.
-2. **Comparison Matrix Table:** `Traditional Scrapers` vs. `Single-Agent Scrapers` vs. `HydraScrape (Parallel Daytona Sandboxes)` across Speed, Resilience, Compute Cost, and Security Isolation.
+2. **Comparison Matrix Table:** `Traditional Scrapers` vs. `Single-Agent Scrapers` vs. `sandScrape (Parallel Daytona Sandboxes)` across Speed, Resilience, Compute Cost, and Security Isolation.
 3. **Why Daytona Makes This Possible:** Visual diagram explaining sub-second sandbox spin-up (`90-200ms`), isolated execution of AI-generated extraction scripts, and instant teardown of losing sandboxes.
 4. **Real-World Use Cases:** LLM RAG ingestion pipelines, live competitor price monitoring, and autonomous AI agent web tooling.
 
@@ -62,7 +62,7 @@ Designed specifically to be presented on screen during the 3-minute judging pitc
 
 ## 4. Directory Structure
 ```text
-hydra-scrape/
+sand-scrape/
 ├── AGENTS.md
 ├── requirements.txt
 ├── .env.example
