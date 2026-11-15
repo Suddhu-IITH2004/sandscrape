@@ -205,7 +205,7 @@
               <span class="hint">1–10 URLs</span>
             </div>
             <div class="card-body">
-              <div class="label-row"><label for="urls" class="label">Target URLs</label><span class="hint">One public URL per line</span></div>
+              <div class="label-row"><label for="urls" class="label">Target URLs</label><span class="hint">One public URL per line or comma-separated</span></div>
               <textarea id="urls" x-model="urlInput" spellcheck="false" placeholder="https://example.com"></textarea>
               <div class="presets">
                 <button class="subtle-btn" @click="setSinglePreset()">Single URL Race · 3 strategies</button>
@@ -402,7 +402,7 @@
           this.$nextTick(() => { if (window.lucide) lucide.createIcons(); });
         },
         parseUrls() {
-          return [...new Set(this.urlInput.split(/\r?\n/).map(value => value.trim()).filter(Boolean))];
+          return [...new Set(this.urlInput.split(/\r?\n|,\s*(?=https?:\/\/)/i).map(value => value.trim()).filter(Boolean))];
         },
         setSinglePreset() { this.urlInput = "https://news.ycombinator.com/"; this.concurrency = 3; },
         setBatchPreset() {
